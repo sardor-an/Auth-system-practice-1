@@ -1,18 +1,17 @@
-from rest_framework.generics import CreateAPIView, UpdateAPIView
+from rest_framework.generics import CreateAPIView, UpdateAPIView, get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.request import Request
 from rest_framework.validators import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
-
 from django.utils.timezone import now
-from .models import User, SmartToken, OneTimeTokenConfirmation, NEW, CODE_VERIFIED, VIA_EMAIL, VIA_PHONE
-from shared.utility import send_email, generate_code
+from .models import User, OneTimeUrl, NEW, CODE_VERIFIED, VIA_EMAIL, VIA_PHONE
+from shared.utility import send_email, link, uid64_decoder
+from .serializer import UserSerializer, LoginRefreshSerializer
+from .serializer import MySignUpSerializer, MyChangeUserInfoModelSerializer, MyChangeUserPhotoSerializer, MyLoginSerializer, MyLogoutSerializer, MyForgotPassword, MyForgotPasswordVerifySerializer, MyLoginRefreshSerializer, MyResetPasswordRebornSerializer
 
-from .serializer import UserSerializer
-from .serializer import MySignUpSerializer, MyChangeUserInfoModelSerializer, MyChangeUserPhotoSerializer, MyLoginSerializer, MyLogoutSerializer, MyForgotPassword, MyForgotPasswordVerifySerializer, MyResetPasswordSerializer
 
 class MySignUpView(CreateAPIView):
     serializer_class = MySignUpSerializer
@@ -205,78 +204,110 @@ class MyForgotPasswordApiView(APIView):
     def post(self, request: Request, *args, **kwargs):
         serializer = MyForgotPassword(data=request.data)
         serializer.is_valid(raise_exception=True)
-        code = generate_code()
+        user = serializer.validated_data['user']
+        url = link(user)
+
+        sent_link = f"http://127.0.0.1:8000/auth/password-reset/{url['uid64']}/{url['token']}"
+
         if serializer.validated_data['auth_type'] == VIA_EMAIL:
-            send_email(serializer.validated_data['user'].email, code)
+            send_email(serializer.validated_data['user'].email, sent_link)
 
         if serializer.validated_data['auth_type'] == VIA_PHONE:
-            send_email(serializer.validated_data['user'].phone, code)
+            send_email(serializer.validated_data['user'].phone, sent_link)
 
-        OneTimeTokenConfirmation.objects.create(
-                user=serializer.validated_data['user'],
-                code=str(code)
-            )
+        
+
+        
+
+        OneTimeUrl.objects.create(
+                user=user,
+                uid64=url['uid64'],
+                token=url['token']
+                
+        )
         
         return Response({
             'success': True,
-            'message': 'Verification code has been sent (demo)',
-            'access': serializer.validated_data['user'].token()['access']
+            'message': 'Verification url has been sent (demo)'
         })
-class MyForgotPasswordVerifyApiView(APIView):
+class MyResetPasswordRebornApiView(APIView):
     permission_classes = [AllowAny, ]
-    serializer_class = MyForgotPasswordVerifySerializer
 
     def post(self, request: Request, *args, **kwargs):
-        code = request.data.get('code', None)
-        serializer = self.serializer_class(data=request.data)
+    
+        serializer = MyResetPasswordRebornSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        otc_instance = request.user.one_time_token_confirmations.filter(user_id=self.request.user.pk, code=code, expiration_time__gte=now(), is_confirmed=False)
-
-        if not otc_instance.exists():
+        uid64 = serializer.validated_data['uid64']
+        token = serializer.validated_data['token']
+        password = serializer.validated_data['password']
+        user: User = uid64_decoder(uid64)
+        url = user.one_time_urls.filter(is_used_once=False, token=token, uid64=uid64)
+        
+        if not url.exists():
             raise ValidationError({
-                'success':False, 
-                'message': 'Your code is expired or wrong'
+                'msg': 'Url sucks'
             })
-        one_time_token = request.user.token()['refresh_token']
-        SmartToken(user=request.user, token=one_time_token).save()
+        
+        url = url.first().delete()
+        user.set_password(password)
+        user.save()
 
         return Response({
-            'warning': 'PLEASE HURRY UP, TOKEN LIVES FOR ONLY 2 MINUTES',
-            'success': True,
-            'message': 'Your one time token that for changing password has been created successfully',
-            'one_time_token': one_time_token
+            'message': 'Operation is done'
         })
-class MyResetPasswordApiView(APIView):
-    permission_classes = [AllowAny, ]
 
-    def put(self, request: Request, *args, **kwargs):
-        print(request.headers)
-        one_time_token = request.headers.get('One-Time-Token', None)
-        serializer = MyResetPasswordSerializer(data=request.data)
+
+
+
+
+
+
+
+
+
+
+class MyLoginRefreshApiView(APIView):
+    permission_classes = [] # imagine your access is expired, how can you refresh it there is isAuthenticated
+    
+    def post(self, request: Request, *args, **kwargs):
+        serializer = MyLoginRefreshSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        if one_time_token is None:
+        try:
+            
+            refresh_token = serializer.validated_data.get('refresh')
+            refresh_obj = RefreshToken(refresh_token)
+            refresh_obj.check_exp()
+            user = get_object_or_404(User, id=refresh_obj['user_id'])
+
+        except Exception as e:
             raise ValidationError({
-                'success': False, 
-                'message': 'one_time_token must be given in headers'
+                'success': False,
+                'message': 'Something went wrong',
+                'error': str(e)
             })
+
         
-        
-        one_time_token_instance = request.user.smart_tokens.filter(user_id=request.user.pk, is_confirmed=False, expiration_time__gte=now(), token=one_time_token)
-        
-        if not one_time_token_instance.exists():
-            raise ValidationError({
-                'success':False,
-                'message': 'Smart token not found'
-            })
-        
-        serializer.update(request.user, serializer.validated_data)
-        used_token = RefreshToken(one_time_token)
-        used_token.blacklist()
-        one_time_token_instance.first().delete()
+        refresh_obj.check_blacklist()
+        refresh_obj.blacklist()
+        new_refresh = RefreshToken.for_user(user)
+
 
         return Response({
             'success': True,
-            'message': 'Password has been changed successfully (demo)'
+            'new_access': str(new_refresh.access_token),
+            'new_refresh_token': str(new_refresh)
+
         })
+
+
+
+    
+
+
+
+
+
+
+class LoginRefreshView(TokenRefreshView):
+    serializer_class = LoginRefreshSerializer

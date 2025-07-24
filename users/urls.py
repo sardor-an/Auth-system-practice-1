@@ -1,18 +1,21 @@
 from django.urls import path
 from .views import MySignUpView, MyVerifyApiView, MyChangeUserInfoApiView, MychangeUserInfoApiUpdateView, \
     MychanegUserPhotoApiView, MyResendCodeApiView, MyLoginApiView, MyLogutApiView, \
-    MyForgotPasswordApiView,MyForgotPasswordVerifyApiView, MyResetPasswordApiView
+    MyForgotPasswordApiView, MyResetPasswordRebornApiView, MyLoginRefreshApiView
 
+from .views import LoginRefreshView
 urlpatterns = [ 
 
+    # ...
+    path('none/login-refresh/', LoginRefreshView.as_view()),
 
     # genius
     path('gen/forgot-password/', MyForgotPasswordApiView.as_view()),
-    path('gen/forgot-password-verify/', MyForgotPasswordVerifyApiView.as_view()),
-    path('gen/reset-password/', MyResetPasswordApiView.as_view()),
+    path('gen/reset-password/', MyResetPasswordRebornApiView.as_view()),
 
 
     # hard practice 1
+    path('mine/login-refresh/', MyLoginRefreshApiView.as_view()),
     path('mine/logout/', MyLogutApiView.as_view()),
     path('mine/login/', MyLoginApiView.as_view()),
     path('mine/resend-code/', MyResendCodeApiView.as_view()),

@@ -2,6 +2,9 @@ from rest_framework import serializers
 from rest_framework.validators import ValidationError
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
+from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework.generics import get_object_or_404
+from django.contrib.auth.models import update_last_login
 from rest_framework.exceptions import NotFound
 from django.core.validators import FileExtensionValidator
 from django.contrib.auth.password_validation import validate_password
@@ -191,8 +194,8 @@ class MyLoginSerializer(TokenObtainPairSerializer):
         attrs['auth_status'] = self.user.auth_status
 
         return attrs
-class MyLoginRefreshSerializer(TokenRefreshSerializer):
-    ...
+class MyLoginRefreshSerializer(serializers.Serializer): # TokenrefreshSer
+    refresh = serializers.CharField(required=True, write_only=True)
 class MyLogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField(required=True, write_only=True)
 class MyForgotPassword(serializers.Serializer):
@@ -261,3 +264,37 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = '__all__'
+
+
+class MyResetPasswordRebornSerializer(serializers.Serializer):
+    uid64 = serializers.CharField(required=True, write_only=True)
+    token = serializers.CharField(required=True, write_only=True)
+    password = serializers.CharField(required=True, write_only=True)
+    password_confirm = serializers.CharField(required=True, write_only=True)
+
+
+    def validate(self, data):
+        password = data.get('password')
+        password_confirm = data.get('password_confirm')
+
+        validate_password(password)
+        validate_password(password_confirm)
+
+        if password_confirm != password:
+            raise ValidationError({
+                'success':True,
+                'message': 'Password do not match'
+            })
+        
+        return data
+
+
+class LoginRefreshSerializer(TokenRefreshSerializer):
+
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        access_token_instance = AccessToken(data['access'])
+        user_id = access_token_instance['user_id']
+        user = get_object_or_404(User, id=user_id)
+        update_last_login(None, user)
+        return data

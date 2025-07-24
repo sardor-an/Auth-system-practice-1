@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from shared.models import Base
-from shared.utility import generate_code, generate_string
+from shared.utility import generate_code, generate_string, link
 from datetime import datetime, timedelta
 
 ORDINARY_USER, MANAGER, ADMIN = ('ORDINARY', 'MANAGER', 'ADMIN')
@@ -117,39 +117,24 @@ class UserConfirmation(Base):
             self.expiration_time = datetime.now() + timedelta(minutes=PHONE_EXPIRATION_TIME)
 
         super(UserConfirmation, self).save(*args, **kwargs)
-class SmartToken(Base, models.Model):
-    expiration_time = models.DateTimeField()
-    token = models.CharField(max_length=255)
-    is_confirmed = models.BooleanField(default=False)
-    user = models.ForeignKey(related_name="smart_tokens", on_delete=models.CASCADE, to=User)
+
+
+
+class OneTimeUrl(Base, models.Model):
+    uid64 = models.CharField()
+    token = models.CharField()
+    is_used_once = models.BooleanField(default=False)
+    user = models.ForeignKey(related_name="one_time_urls", on_delete=models.CASCADE, to=User)
+
 
     def save(self, *args, **kwargs):
-        if SmartToken.objects.filter(id=self.id).exists():
-            current_user = SmartToken.objects.get(id=self.id)
-            const_original = current_user.expiration_time
-            if const_original != self.expiration_time:
-                raise ValidationError('Expiration time cannot be changed')
-        else:
-            print('this line is working')
-            self.expiration_time = datetime.now() + timedelta(minutes=2)
-            
+        if OneTimeUrl.objects.filter(id=self.id).exists():
+            current_url = OneTimeUrl.objects.get(id=self.id)
+            const_token = current_url.token
+            const_uid64 = current_url.uid64
+            if const_uid64 != self.uid64 or const_token != self.token:
+                raise ValidationError('Token or uid64 cannot be changed')
         
         super().save(*args, **kwargs)
-class OneTimeTokenConfirmation(Base, models.Model):
-    user = models.ForeignKey(to=User, related_name='one_time_token_confirmations', on_delete=models.CASCADE)
-    code = models.CharField(max_length=6)
-    is_confirmed = models.BooleanField(default=False)
-    expiration_time = models.DateTimeField()
 
-    def save(self, *args, **kwargs):
-        if OneTimeTokenConfirmation.objects.filter(id=self.id).exists():
-            current_user = OneTimeTokenConfirmation.objects.get(id=self.id)
-            const_original = current_user.expiration_time
-            if const_original != self.expiration_time:
-                raise ValidationError('Expiration time cannot be changed')
-        else:
-            print('this line is working')
-            self.expiration_time = datetime.now() + timedelta(minutes=2)
-            
-        
-        super().save(*args, **kwargs)
+

@@ -1,9 +1,8 @@
 from django.contrib import admin
-from .models import User, UserConfirmation, OneTimeTokenConfirmation, SmartToken
-
-admin.site.register(OneTimeTokenConfirmation)
-admin.site.register(SmartToken)
+from .models import User, UserConfirmation, OneTimeUrl
+admin.site.register(OneTimeUrl)
 admin.site.register(UserConfirmation)
+
 
 
 @admin.register(User)
